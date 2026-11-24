@@ -1,32 +1,54 @@
-# React + TypeScript + Vite
+# 해양대 GIF 스튜디오
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+이미지·영상·기존 GIF를 브라우저에서 편집하고 GIF로 저장합니다. 업로드한 미디어는 서버로 전송하지 않습니다.
 
-Currently, two official plugins are available:
+## 편집 기능
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- 기존 GIF의 모든 프레임과 표시 시간을 가져옵니다. 투명 패치와 disposal 2/3을 합성하여 장면을 복원합니다.
+- 여러 이미지·GIF를 추가하면 선택한 파일 순서대로 이어 붙입니다. 드래그 또는 좌우 이동 버튼으로 순서를 수정합니다.
+- 프레임별 표시 시간, 선택 삭제, 전체 삭제, 순서 반전을 지원합니다.
+- 선택한 프레임 또는 전체 프레임을 좌우 90° 회전하거나 좌우 반전합니다. 선택이 없으면 전체에 적용됩니다.
+- 정방향·역재생·왕복 재생을 지원합니다. 왕복은 양 끝 프레임을 중복하지 않습니다.
+- 영상 시작·끝을 슬라이더 또는 초 단위 숫자로 지정하고 구간 미리보기 후 캡처합니다. 영상 자르기는 선택 구간을 GIF로 만드는 기능입니다.
+- 320px/64색 최적화, 출력 너비·색상 수 조절, 전체 시간을 유지하는 프레임 절반 축소를 지원합니다. 실제 용량은 생성 후 표시합니다.
+- 최근 30단계 실행 취소·다시 실행, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z를 지원합니다. 입력 칸 안에서는 기본 텍스트 실행 취소를 사용합니다.
+- 기존 문구·글자별 색상·텍스트 애니메이션 기능을 유지합니다.
 
-## React Compiler
+## 사용 순서
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. 이미지·GIF를 추가하거나 영상에서 원하는 구간을 캡처합니다.
+2. 프레임 순서와 표시 시간을 수정합니다. 체크박스로 선택해 회전·반전하거나 삭제할 수 있습니다.
+3. 재생 방향과 출력 크기·화질을 고릅니다. 필요하면 용량 최적화 또는 프레임 축소를 적용합니다.
+4. GIF 생성하기를 누르고 미리보기·실제 용량을 확인한 뒤 다운로드합니다.
 
-## Expanding the Oxlint configuration
+## 제한
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+- 프로젝트당 최대 300프레임, GIF 파일당 최대 64MB입니다. 남은 한도를 넘는 GIF는 일부만 가져오지 않고 안내합니다.
+- 큰 GIF는 최대 변 800px 및 파일당 총 2,400만 픽셀 범위로 축소하여 메모리를 제한합니다.
+- 출력 가로·세로는 최대 1280px입니다. 비율이 다른 파일은 첫 프레임 비율과 프레임 맞춤 설정을 따릅니다.
+- 원래 GIF 표시 시간은 유지합니다. 개별 시간을 비우면 기본 속도가 적용됩니다. GIF 시간 해상도에 따라 재생 시간에 미세한 차이가 날 수 있습니다.
+- 투명 영역은 출력 배경색으로 저장합니다. 편집 기록은 현재 탭의 메모리에만 유지되며 새로고침하면 초기화됩니다.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+## 개발 및 배포
+
+```sh
+npm ci
+npm run dev
+# http://localhost:5173/app.html
+npm run build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+`app.html`이 편집 가능한 진입점이며, 루트 `index.html`은 GitHub Pages용 빌드 결과입니다. 생성된 `index.html`을 직접 수정하지 마세요.
+
+빌드하면 `dist/index.html`, 루트 `index.html`, `GIF생성기.html`을 생성합니다. main 브랜치 루트를 사용하는 기존 GitHub Pages에는 코드와 생성된 `index.html`을 함께 커밋·푸시합니다. HTML은 스크립트·스타일·앱 이미지를 포함하며 웹 폰트는 외부에서 불러옵니다.
+
+Windows에서 Vite 설정 로더가 프로세스 실행 오류를 내면 Node 24 이상에서 다음 명령을 사용할 수 있습니다.
+
+```sh
+npx tsc -b
+npx vite build --configLoader native
+```
+
+## 회귀 검증
+
+개발 서버의 `/tests/editor.html`에서 프레임·시간, 투명 합성, disposal 2/3, GIF 연결, 한도 초과, 회전·반전 픽셀, 프레임 축소 시간, 역재생·왕복, 영상 캡처 범위, 출력 크기 제한, 인코딩 후 재가져오기를 검사합니다.

@@ -1,4 +1,4 @@
-import { fileToFrame } from './images'
+import { fileToFrame, revokeFrames } from './images'
 import type { Frame } from '../types'
 
 export const VIDEO_ACCEPT =
@@ -10,8 +10,10 @@ export function isVideoFile(file: File): boolean {
   return /\.(mp4|webm|mov|ogg|ogv|m4v)$/i.test(file.name)
 }
 
-function seek(video: HTMLVideoElement, time: number): Promise<void> {
+function seek(video: HTMLVideoElement, time: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException('취소되었습니다.', 'AbortError')); return }
+    if (Math.abs(video.currentTime - time) < 0.001 && video.readyState >= 2) { resolve(); return }
     const onSeeked = () => {
       cleanup()
       resolve()
@@ -20,12 +22,17 @@ function seek(video: HTMLVideoElement, time: number): Promise<void> {
       cleanup()
       reject(new Error('동영상 위치를 이동할 수 없습니다.'))
     }
+    const onAbort = () => { cleanup(); reject(new DOMException('취소되었습니다.', 'AbortError')) }
+    const timeout = window.setTimeout(onError, 15000)
     const cleanup = () => {
+      window.clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
       video.removeEventListener('seeked', onSeeked)
       video.removeEventListener('error', onError)
     }
     video.addEventListener('seeked', onSeeked)
     video.addEventListener('error', onError)
+    signal?.addEventListener('abort', onAbort, { once: true })
     video.currentTime = time
   })
 }
@@ -48,8 +55,9 @@ function canvasToFile(canvas: HTMLCanvasElement, name: string): Promise<File> {
 
 export function captureTimes(start: number, end: number, fps: number, maxFrames: number): number[] {
   const span = Math.max(0, end - start)
-  const count = Math.min(maxFrames, Math.max(1, Math.floor(span * fps) + 1))
-  const step = count > 1 ? span / (count - 1) : 0
+  if (!Number.isFinite(span) || span <= 0 || fps <= 0 || maxFrames < 1) return []
+  const count = Math.min(maxFrames, Math.max(1, Math.ceil(span * fps)))
+  const step = span / count
   return Array.from({ length: count }, (_, i) => start + step * i)
 }
 
@@ -74,10 +82,11 @@ export async function captureVideoFrames(options: {
 
   video.pause()
   const frames: Frame[] = []
+  try {
   for (let i = 0; i < times.length; i += 1) {
     if (signal?.aborted) throw new DOMException('취소되었습니다.', 'AbortError')
     const time = times[i] ?? 0
-    await seek(video, Math.min(time, Math.max(0, video.duration - 0.001)))
+    await seek(video, Math.min(time, Math.max(0, video.duration - 0.001)), signal)
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
     const file = await canvasToFile(
       canvas,
@@ -86,5 +95,7 @@ export async function captureVideoFrames(options: {
     frames.push(await fileToFrame(file))
     onProgress(i + 1, times.length)
   }
+  if (signal?.aborted) throw new DOMException('취소되었습니다.', 'AbortError')
   return frames
+  } catch (error) { revokeFrames(frames); throw error }
 }

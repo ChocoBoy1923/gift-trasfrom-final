@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
-import { frameDelayMs } from '../lib/format'
+import { frameDelayMs, playbackSequence } from '../lib/format'
 import {
   createTextOverlay,
   drawFitted,
@@ -136,11 +136,12 @@ export function TextPanel({
 
     let index = 0
     let cancelled = false
-    const total = Math.max(1, frames.length)
+    const sequence = playbackSequence(frames, settings.playback)
+    const total = Math.max(1, sequence.length)
 
     const draw = () => {
       if (cancelled) return
-      const frame = frames[index % total]
+      const frame = sequence[index % total]
       if (frame) {
         drawFitted(ctx, frame.image, canvas.width, canvas.height, settings.fit, settings.background)
       } else {
@@ -181,10 +182,10 @@ export function TextPanel({
     let timer = 0
     const tick = () => {
       if (cancelled) return
-      const shown = frames[index % total]
+      const shown = sequence[index % total]
       draw()
       const delay = shown ? frameDelayMs(shown, settings) : settings.delayMs
-      timer = window.setTimeout(tick, Math.max(60, delay))
+      timer = window.setTimeout(tick, Math.max(20, delay))
     }
 
     void ensureFontsLoaded(overlays).then(dragging ? draw : tick)

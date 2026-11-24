@@ -6,6 +6,9 @@ import { FrameStrip } from './components/FrameStrip'
 import { PreviewPanel } from './components/PreviewPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { TextPanel } from './components/TextPanel'
+import { EditorTools } from './components/EditorTools'
+import { reduceFrames, transformFrames } from './lib/editor'
+import { useEditor } from './lib/useEditor'
 import { VideoCapture } from './components/VideoCapture'
 import { encodeGif } from './lib/encodeGif'
 import {
@@ -16,14 +19,13 @@ import {
   reorder,
   resolveOutputSize,
 } from './lib/format'
-import { createDemoFrames, filesToFrames, revokeFrames } from './lib/images'
+import { createDemoFrames, filesToFrames } from './lib/images'
 import { createTextOverlay } from './lib/render'
 import type {
   EncodeProgress,
   Frame,
   GifResult,
   GifSettings,
-  TextOverlay,
 } from './types'
 
 const KMOU_URL = 'https://www.kmou.ac.kr/kmou/main.do'
@@ -43,15 +45,19 @@ const DEFAULT_SETTINGS: GifSettings = {
 }
 
 export default function App() {
-  const [frames, setFrames] = useState<Frame[]>([])
-  const [settings, setSettings] = useState<GifSettings>(DEFAULT_SETTINGS)
-  const [overlays, setOverlays] = useState<TextOverlay[]>(() => [createTextOverlay()])
+  const initialDocument = useMemo(() => ({ frames: [], settings: DEFAULT_SETTINGS, overlays: [createTextOverlay()] }), [])
+  const { frames, setFrames, settings, setSettings, overlays, setOverlays, undo, redo, canUndo, canRedo } = useEditor(initialDocument)
+  const [working, setWorking] = useState(false)
+  const [capturing, setCapturing] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const importLock = useRef(false)
   const [tab, setTab] = useState<'image' | 'video'>('image')
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState<EncodeProgress | null>(null)
   const [result, setResult] = useState<GifResult | null>(null)
+  const busy = generating || working || capturing
   const abortRef = useRef<AbortController | null>(null)
   const framesRef = useRef(frames)
   framesRef.current = frames
@@ -65,59 +71,63 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      revokeFrames(framesRef.current)
       abortRef.current?.abort()
     }
   }, [])
 
   const addFiles = useCallback(
     async (files: FileList | File[]) => {
+      if (importLock.current) return
+      importLock.current = true
+      setWorking(true)
       setError(null)
       try {
-        const { frames: next, skipped, truncated } = await filesToFrames(
+        const { frames: next, skipped, truncated, errors } = await filesToFrames(
           files,
           framesRef.current.length,
         )
-        if (next.length === 0 && skipped === 0 && truncated === 0) {
+        if (next.length === 0 && skipped === 0 && truncated === 0 && errors.length === 0) {
           setNotice('이미지 파일을 찾지 못했습니다.')
           return
         }
-        setFrames((current) => [...current, ...next])
-        clearResult()
-        const messages = []
+        if (next.length) {
+          setFrames((current) => [...current, ...next])
+          clearResult()
+        }
+        const messages = [...errors]
         if (skipped) messages.push(`이미지가 아닌 파일 ${skipped}개를 건너뛰었습니다.`)
-        if (truncated) messages.push(`최대 80장까지 넣을 수 있어 ${truncated}장을 제외했습니다.`)
+        if (truncated) messages.push(`최대 300프레임 한도로 파일 ${truncated}개를 제외했습니다.`)
         setNotice(messages.length ? messages.join(' ') : null)
       } catch {
-        setError('이미지를 불러오지 못했습니다. 다른 파일로 다시 시도해 주세요.')
+        setError('이미지나 GIF를 불러오지 못했습니다. 다른 파일로 다시 시도해 주세요.')
+      } finally {
+        importLock.current = false
+        setWorking(false)
       }
     },
-    [clearResult],
+    [clearResult, setFrames],
   )
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const files = Array.from(event.clipboardData?.files ?? [])
-      if (files.length > 0) {
+      if (files.length > 0 && !busy) {
         event.preventDefault()
         void addFiles(files)
       }
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [addFiles])
+  }, [addFiles, busy])
 
   const removeFrame = (id: string) => {
     setFrames((current) => {
-      const target = current.find((frame) => frame.id === id)
-      if (target) URL.revokeObjectURL(target.url)
       return current.filter((frame) => frame.id !== id)
     })
     clearResult()
   }
 
   const clearFrames = () => {
-    revokeFrames(frames)
     setFrames([])
     clearResult()
     setNotice(null)
@@ -142,7 +152,7 @@ export default function App() {
   }, [frames, outputSize.height, outputSize.width, settings])
 
   const generate = async () => {
-    if (frames.length === 0 || generating) return
+    if (frames.length === 0 || busy) return
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -175,7 +185,6 @@ export default function App() {
 
   const cancel = () => {
     abortRef.current?.abort()
-    setGenerating(false)
     setProgress(null)
   }
 
@@ -190,27 +199,57 @@ export default function App() {
   }
 
   const loadDemoWithText = async () => {
-    await loadDemo()
-    setOverlays((current) => {
-      const [first, ...rest] = current
-      if (!first || current.some((overlay) => overlay.text)) return current
-      return [{ ...first, text: '해양대 GIF 스튜디오', animation: 'typing' }, ...rest]
-    })
-  }
-
-  const loadDemo = async () => {
-    clearFrames()
-    const demo = await createDemoFrames()
-    setFrames(demo)
-    setNotice('샘플 프레임 6장을 넣었습니다. 바로 생성해 보세요.')
+    setWorking(true)
+    try {
+      const demo = await createDemoFrames()
+      setFrames(demo)
+      setOverlays((current) => {
+        const [first, ...rest] = current
+        if (!first || current.some((overlay) => overlay.text)) return current
+        return [{ ...first, text: '해양대 GIF 스튜디오', animation: 'typing' }, ...rest]
+      })
+      clearResult()
+      setNotice('샘플 프레임 6장을 넣었습니다. 바로 생성해 보세요.')
+    } catch { setError('샘플 이미지를 만들지 못했습니다. 다시 시도해 주세요.') }
+    finally { setWorking(false) }
   }
 
   const onVideoCaptured = (captured: Frame[], fps: number) => {
-    revokeFrames(frames)
     setFrames(captured)
     setSettings((current) => ({ ...current, delayMs: Math.max(20, Math.round(1000 / fps)) }))
     clearResult()
     setNotice(`동영상에서 ${captured.length}프레임을 캡처했습니다. 재생 속도를 ${fps.toFixed(1)} fps에 맞췄습니다.`)
+  }
+
+  useEffect(() => {
+    setSelected(current => {
+      const next = new Set([...current].filter(id => frames.some(frame => frame.id === id)))
+      return next.size === current.size ? current : next
+    })
+  }, [frames])
+
+  const restore = (action: () => void) => { action(); clearResult(); setSelected(new Set()) }
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      if (busy || target.closest('input,textarea,select,[contenteditable=true]') || !(event.ctrlKey || event.metaKey)) return
+      if (event.key.toLowerCase() === 'z') {
+        event.preventDefault(); (event.shiftKey ? redo : undo)(); clearResult(); setSelected(new Set())
+      }
+    }
+    window.addEventListener('keydown', shortcut)
+    return () => window.removeEventListener('keydown', shortcut)
+  }, [busy, undo, redo, clearResult])
+
+  const transform = async (action: 'left' | 'right' | 'flip') => {
+    setWorking(true); setError(null)
+    try {
+      const changed = await transformFrames(frames.filter(frame => !selected.size || selected.has(frame.id)), action)
+      const byId = new Map(changed.map(frame => [frame.id, frame]))
+      setFrames(current => current.map(frame => byId.get(frame.id) ?? frame))
+      clearResult()
+    } catch { setError('프레임 변환에 실패했습니다. 이미지 크기를 줄여 다시 시도해 주세요.') }
+    finally { setWorking(false) }
   }
 
   return (
@@ -219,7 +258,7 @@ export default function App() {
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault()
-        if (tab === 'image' && event.dataTransfer.files.length > 0) void addFiles(event.dataTransfer.files)
+        if (!busy && tab === 'image' && event.dataTransfer.files.length > 0) void addFiles(event.dataTransfer.files)
       }}
     >
       <header className="site-header">
@@ -244,7 +283,7 @@ export default function App() {
           <p className="hero-kicker">KMOU GIF STUDIO</p>
           <h1>해양대 GIF 스튜디오</h1>
           <p className="hero-copy">
-            이미지나 동영상을 움직이는 GIF로. 문구까지 얹어서 바로 다운로드하세요. 변환은 이 브라우저에서만 이뤄집니다.
+            이미지·영상·기존 GIF를 하나로. 회전, 프레임 편집과 용량 최적화까지. 변환은 이 브라우저에서만 이뤄집니다.
           </p>
         </div>
         <svg className="waves" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
@@ -261,17 +300,17 @@ export default function App() {
             role="tab"
             aria-selected={tab === 'image'}
             className={`tab ${tab === 'image' ? 'is-on' : ''}`}
-            disabled={generating}
+            disabled={busy}
             onClick={() => setTab('image')}
           >
-            이미지 → GIF
+            이미지·GIF 편집
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={tab === 'video'}
             className={`tab ${tab === 'video' ? 'is-on' : ''}`}
-            disabled={generating}
+            disabled={busy}
             onClick={() => setTab('video')}
           >
             동영상 → GIF
@@ -281,21 +320,32 @@ export default function App() {
       {tab === 'image' ? (
         <DropZone
           compact={frames.length > 0}
-          disabled={generating}
+          disabled={busy}
           onFiles={addFiles}
           onDemo={() => void loadDemoWithText()}
         />
       ) : (
-        <VideoCapture disabled={generating} onCaptured={onVideoCaptured} />
+        <VideoCapture disabled={busy} onBusyChange={setCapturing} onCaptured={onVideoCaptured} />
       )}
 
+      {working && <p className="notice" role="status">파일을 처리하고 있습니다. 잠시 기다려 주세요.</p>}
+      <EditorTools frames={frames} selected={new Set([...selected].filter(id => frames.some(frame => frame.id === id)))} disabled={busy}
+        canUndo={canUndo} canRedo={canRedo} onUndo={() => restore(undo)} onRedo={() => restore(redo)}
+        onTransform={action => void transform(action)} settings={settings}
+        onSettings={next => { setSettings(next); clearResult() }}
+        onOptimize={() => { setSettings(current => ({ ...current, widthMode: '320', quality: 'small' })); clearResult(); setNotice('320px / 64색을 적용했습니다. GIF를 생성하여 실제 용량을 확인하세요.') }}
+        onReduce={() => { setFrames(current => reduceFrames(current, settings)); clearResult(); setSelected(new Set()) }}
+        onSelectAll={() => setSelected(selected.size === frames.length ? new Set() : new Set(frames.map(frame => frame.id)))}
+        onDelete={() => { setFrames(current => current.filter(frame => !selected.has(frame.id))); clearResult(); setSelected(new Set()) }} />
       {notice && <p className="notice">{notice}</p>}
 
       {frames.length > 0 && (
         <FrameStrip
           frames={frames}
+          selected={selected}
+          onToggle={id => setSelected(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })}
           defaultDelayMs={settings.delayMs}
-          disabled={generating}
+          disabled={busy}
           onDelayChange={(id, delayMs) => {
             setFrames((current) =>
               current.map((frame) => (frame.id === id ? { ...frame, delayMs } : frame)),
@@ -324,7 +374,7 @@ export default function App() {
         frames={frames}
         settings={settings}
         outputSize={outputSize}
-        disabled={generating}
+        disabled={busy}
         onChange={(next) => {
           setOverlays(next)
           clearResult()
@@ -333,7 +383,7 @@ export default function App() {
 
       <div className="workspace">
         <PreviewPanel
-          canGenerate={frames.length > 0}
+          canGenerate={frames.length > 0 && !busy}
           generating={generating}
           progress={progress}
           result={result}
@@ -345,7 +395,7 @@ export default function App() {
         />
         <SettingsPanel
           settings={settings}
-          disabled={generating}
+          disabled={busy}
           onChange={(next) => {
             setSettings(next)
             clearResult()

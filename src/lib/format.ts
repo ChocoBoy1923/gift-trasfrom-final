@@ -8,7 +8,7 @@ export const QUALITY_COLORS: Record<QualityPreset, number> = {
 }
 
 export const MAX_OUTPUT_WIDTH = 1280
-export const MAX_FRAMES = 80
+export const MAX_FRAMES = 300
 export const ACCEPT_ATTR =
   'image/jpeg,image/png,image/webp,image/gif,image/bmp,image/avif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.bmp,.avif,.svg'
 
@@ -66,7 +66,9 @@ export function resolveOutputSize(frames: Frame[], settings: GifSettings): {
   }
 
   targetW = Math.min(MAX_OUTPUT_WIDTH, Math.max(16, Math.round(targetW)))
-  const height = Math.max(16, Math.round((srcH / srcW) * targetW))
+  // Bound both dimensions, including tall phone videos and rotated frames.
+  targetW = Math.min(targetW, Math.max(16, Math.round(MAX_OUTPUT_WIDTH * srcW / srcH)))
+  const height = Math.min(MAX_OUTPUT_WIDTH, Math.max(16, Math.round((srcH / srcW) * targetW)))
   return { width: targetW, height }
 }
 

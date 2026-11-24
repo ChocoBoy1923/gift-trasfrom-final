@@ -65,13 +65,14 @@ export function DropZone({ compact, disabled, onFiles, onDemo }: DropZoneProps) 
       </div>
       <div className="dropzone-copy">
         <p className="dropzone-title">
-          {compact ? '이미지를 더 추가할 수 있습니다' : '이미지를 여기에 놓거나 파일을 선택하세요'}
+          {compact ? '이미지·GIF를 추가하여 이어 붙이세요' : '이미지·GIF를 여기에 놓거나 선택하세요'}
         </p>
         <p className="dropzone-help">
           {compact
             ? '드래그 앤 드롭 또는 파일 선택 · JPG PNG WEBP GIF'
-            : 'JPG, PNG, WEBP, GIF, BMP, AVIF · 여러 장 한 번에 가능 · 최대 80장'}
+            : 'JPG, PNG, WEBP, GIF, BMP, AVIF · 여러 GIF 이어 붙이기 · 최대 300프레임'}
         </p>
+        <p className="hint">GIF는 파일당 64MB까지 지원합니다. 큰 GIF는 편집 성능을 위해 최대 800px로 축소하며, 투명 영역은 출력 배경색으로 저장합니다.</p>
       </div>
       <div className="dropzone-actions">
         <button
@@ -80,7 +81,7 @@ export function DropZone({ compact, disabled, onFiles, onDemo }: DropZoneProps) 
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
         >
-          {compact ? '이미지 추가' : '이미지 선택'}
+          {compact ? '이미지·GIF 추가' : '이미지·GIF 선택'}
         </button>
         {!compact && (
           <button

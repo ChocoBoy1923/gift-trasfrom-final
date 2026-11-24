@@ -10,6 +10,7 @@ import type { Frame } from '../types'
 
 type VideoCaptureProps = {
   disabled?: boolean
+  onBusyChange: (busy: boolean) => void
   onCaptured: (frames: Frame[], fps: number) => void
 }
 
@@ -22,7 +23,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toFixed(1).padStart(4, '0')}`
 }
 
-export function VideoCapture({ disabled, onCaptured }: VideoCaptureProps) {
+export function VideoCapture({ disabled, onCaptured, onBusyChange }: VideoCaptureProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -68,7 +69,7 @@ export function VideoCapture({ disabled, onCaptured }: VideoCaptureProps) {
   }
 
   const times = duration > 0 ? captureTimes(start, end, fps, MAX_FRAMES) : []
-  const wanted = duration > 0 ? Math.floor(Math.max(0, end - start) * fps) + 1 : 0
+  const wanted = duration > 0 ? Math.ceil(Math.max(0, end - start) * fps) : 0
   const capped = wanted > MAX_FRAMES
   const capturing = progress !== null
 
@@ -77,6 +78,7 @@ export function VideoCapture({ disabled, onCaptured }: VideoCaptureProps) {
     if (!video || !file || times.length === 0) return
     const controller = new AbortController()
     abortRef.current = controller
+    onBusyChange(true)
     setError(null)
     setProgress({ current: 0, total: times.length })
     try {
@@ -87,12 +89,13 @@ export function VideoCapture({ disabled, onCaptured }: VideoCaptureProps) {
         signal: controller.signal,
         onProgress: (done, total) => setProgress({ current: done, total }),
       })
-      onCaptured(frames, capped ? (times.length - 1) / Math.max(0.1, end - start) : fps)
+      onCaptured(frames.map(frame => ({ ...frame, delayMs: Math.max(20, (end - start) * 1000 / frames.length) })), times.length / (end - start))
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === 'AbortError')) {
         setError('프레임을 캡처하지 못했습니다. 다른 동영상으로 시도해 주세요.')
       }
     } finally {
+      onBusyChange(false)
       setProgress(null)
       abortRef.current = null
     }
@@ -151,7 +154,7 @@ export function VideoCapture({ disabled, onCaptured }: VideoCaptureProps) {
       <div className="panel-head">
         <div>
           <p className="kicker">동영상</p>
-          <h2>구간 캡처</h2>
+          <h2>영상 구간 자르기</h2>
         </div>
         <button
           type="button"
@@ -195,7 +198,7 @@ export function VideoCapture({ disabled, onCaptured }: VideoCaptureProps) {
               video.addEventListener('durationchange', onDuration)
               video.currentTime = Number.MAX_SAFE_INTEGER
             }}
-            onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)}
+            onTimeUpdate={(event) => { setCurrent(event.currentTarget.currentTime); if (!capturing && event.currentTarget.currentTime >= end && !event.currentTarget.paused) event.currentTarget.pause() }}
             onError={() =>
               setError('이 동영상은 브라우저에서 열 수 없습니다. MP4(H.264)나 WEBM 파일로 시도해 주세요.')
             }
@@ -293,6 +296,11 @@ export function VideoCapture({ disabled, onCaptured }: VideoCaptureProps) {
             </div>
           </fieldset>
 
+          <div className="trim-inputs">
+            <label className="inline-num">시작(초)<input type="number" min={0} max={end} step={0.01} value={start} disabled={busy || !duration} onChange={e => setStart(Math.max(0, Math.min(end, Number(e.target.value))))} /></label>
+            <label className="inline-num">끝(초)<input type="number" min={start} max={duration} step={0.01} value={end} disabled={busy || !duration} onChange={e => setEnd(Math.max(start, Math.min(duration, Number(e.target.value))))} /></label>
+            <button className="chip" disabled={busy || end <= start} onClick={() => { if (videoRef.current) { videoRef.current.currentTime = start; void videoRef.current.play() } }}>선택 구간 미리보기</button>
+          </div>
           <p className="summary">
             구간 {(end - start).toFixed(1)}초 → {times.length}프레임 캡처
             {capped && ` (최대 ${MAX_FRAMES}장으로 간격을 넓혀 캡처)`}

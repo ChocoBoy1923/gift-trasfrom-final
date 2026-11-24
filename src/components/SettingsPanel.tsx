@@ -100,7 +100,7 @@ export function SettingsPanel({ settings, disabled, onChange }: SettingsPanelPro
             [
               ['forward', '정방향'],
               ['reverse', '역재생'],
-              ['pingpong', '부메랑'],
+              ['pingpong', '왕복 재생'],
             ] as const
           ).map(([mode, label]) => (
             <button

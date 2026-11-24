@@ -3,6 +3,8 @@ import { MAX_FRAME_DELAY_MS, MIN_FRAME_DELAY_MS } from '../lib/format'
 import type { Frame } from '../types'
 
 type FrameStripProps = {
+  selected: Set<string>
+  onToggle: (id: string) => void
   frames: Frame[]
   defaultDelayMs: number
   disabled?: boolean
@@ -95,6 +97,8 @@ function DelayInput({
 
 export function FrameStrip({
   frames,
+  selected,
+  onToggle,
   defaultDelayMs,
   disabled,
   onReorder,
@@ -174,6 +178,7 @@ export function FrameStrip({
                 setOverIndex(null)
               }}
             >
+              <label className="frame-select"><input type="checkbox" checked={selected.has(frame.id)} disabled={disabled} onChange={() => onToggle(frame.id)} aria-label={`${index + 1}번 프레임 선택`} /> 선택</label>
               <div className="cell-num">{String(index + 1).padStart(2, '0')}</div>
               <div className="cell-thumb">
                 <img src={frame.url} alt={frame.name} draggable={false} />

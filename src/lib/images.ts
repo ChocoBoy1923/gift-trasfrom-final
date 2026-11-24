@@ -1,5 +1,6 @@
 import { isImageFile, MAX_FRAMES } from './format'
 import type { Frame } from '../types'
+import { decodeGif } from './decodeGif'
 
 function loadImageElement(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -32,14 +33,24 @@ export async function fileToFrame(file: File): Promise<Frame> {
 export async function filesToFrames(
   files: FileList | File[],
   currentCount: number,
-): Promise<{ frames: Frame[]; skipped: number; truncated: number }> {
+): Promise<{ frames: Frame[]; skipped: number; truncated: number; errors: string[] }> {
   const incoming = Array.from(files).filter(isImageFile)
   const skipped = Array.from(files).length - incoming.length
-  const room = Math.max(0, MAX_FRAMES - currentCount)
-  const selected = incoming.slice(0, room)
-  const truncated = incoming.length - selected.length
-  const frames = await Promise.all(selected.map(fileToFrame))
-  return { frames, skipped, truncated }
+  const frames: Frame[] = []
+  const errors: string[] = []
+  let truncated = 0
+  for (const file of incoming) {
+    const room = MAX_FRAMES - currentCount - frames.length
+    if (room <= 0) { truncated++; continue }
+    try {
+      const header = new Uint8Array(await file.slice(0, 6).arrayBuffer())
+      const isGif = String.fromCharCode(...header).startsWith('GIF8')
+      frames.push(...(isGif ? await decodeGif(file, room) : [await fileToFrame(file)]))
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : `${file.name}: 파일을 읽지 못했습니다.`)
+    }
+  }
+  return { frames, skipped, truncated, errors }
 }
 
 export function revokeFrames(frames: Frame[]): void {
